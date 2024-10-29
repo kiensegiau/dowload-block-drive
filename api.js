@@ -2,16 +2,11 @@ const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-// Import app.js và OUTPUT_DIR
+
+// Import các module cần thiết
 const { downloadFromDriveId, OUTPUT_DIR, TEMP_DIR } = require('./app.js');
-
-// Cấu hình credentials
-const TOKEN_PATH = path.join(__dirname, 'token.json');
-const SCOPES = [
-    'https://www.googleapis.com/auth/drive.readonly',
-    'https://www.googleapis.com/auth/drive.file'
-];
-
+const { PDFProcessor } = require('./pdf.js');
+const TOKEN_PATH = "token.json";
 class DriveAPI {
     constructor() {
         this.drive = null;
@@ -96,9 +91,9 @@ class DriveAPI {
 
             do {
                 const response = await this.drive.files.list({
-                    q: `'${folderId}' in parents`,
+                    q: `'${folderId}' in parents and trashed = false`,
                     spaces: 'drive',
-                    fields: 'nextPageToken, files(id, name)',
+                    fields: 'nextPageToken, files(id, name, mimeType)',
                     pageToken: pageToken,
                     supportsAllDrives: true,
                     includeItemsFromAllDrives: true,
@@ -153,95 +148,55 @@ async function testDriveAPI() {
     }
 }
 
-// Chạy test
-testDriveAPI();
-
 async function listFolderContents() {
     try {
         const driveAPI = new DriveAPI();
         await driveAPI.initialize();
-        const files = await driveAPI.getFolderContents(
-          "1gtnc7ot9bix4J8qlx2KQjFGJRqEisLfN"
+        
+        // Sử dụng folder ID mới
+        const folderId = "1MyQFPc1p-6yQEfxdR8TaoIU8ugVRulr8";
+        
+        const files = await driveAPI.getFolderContents(folderId);
+        
+        // Phân loại files
+        const pdfFiles = files.filter(file => 
+            file.mimeType === 'application/pdf'
         );
-        console.log('📂 Nội dung thư mục:', files);
         
-        // Lọc các file video
-        const videoFiles = files.filter(file => {
-            const videoExtensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv'];
-            return videoExtensions.some(ext => 
-                file.name.toLowerCase().endsWith(ext) || 
-                (!file.name.includes('.')) // File không có đuôi (có thể là video)
-            );
-        });
-        
-        console.log(`\n🎥 Tìm thấy ${videoFiles.length} file video`);
-        
-        // Lưu trữ thông tin file gốc và file tạm
-        const fileMapping = [];
-        
-        // Tải tuần tự từng file video
-        for (const file of videoFiles) {
-            console.log(`\n🎬 Bắt đầu tải: ${file.name}`);
-            try {
-                // Đảm bảo tên file có đuôi .mp4
-                let originalName = file.name;
-                if (!originalName.toLowerCase().endsWith('.mp4')) {
-                    originalName += '.mp4';
-                }
-                // Tạo tên file an toàn cho quá trình xử lý
-                const safeName = originalName.replace(/[^a-zA-Z0-9-_.]/g, '_');
-                
-                await downloadFromDriveId(file.id, safeName);
-                console.log(`✅ Đã tải xong: ${safeName}`);
-                
-                // Lưu mapping giữa tên an toàn và tên gốc
-                fileMapping.push({
-                    safe: safeName,
-                    original: originalName
-                });
-            } catch (error) {
-                console.error(`❌ Lỗi khi tải ${file.name}:`, error.message);
-                continue;
-            }
+        const videoFiles = files.filter(file => 
+            file.mimeType.includes('video/') || 
+            file.mimeType.includes('application/vnd.google-apps.video')
+        );
+
+        // Xử lý PDF files
+        if (pdfFiles.length > 0) {
+            console.log(`\n📑 Tìm thấy ${pdfFiles.length} file PDF - Bắt đầu xử lý...`);
+            const pdfProcessor = new PDFProcessor(driveAPI);
+            await pdfProcessor.processFiles(pdfFiles);
         }
-        
-        console.log('\n✅ Đã tải xong tất cả các file video!');
-        
-        // Đổi tên các file về tên gốc
-        console.log('\n🔄 Đang đổi tên các file về tên gốc...');
-        for (const map of fileMapping) {
-            const oldPath = path.join(OUTPUT_DIR, map.safe);
-            const newPath = path.join(OUTPUT_DIR, map.original);
-            try {
-                if (fs.existsSync(oldPath)) {
-                    fs.renameSync(oldPath, newPath);
-                    console.log(`✅ Đã đổi tên: ${map.safe} -> ${map.original}`);
-                } else {
-                    console.log(`⚠️ Không tìm thấy file: ${map.safe}`);
-                }
-            } catch (error) {
-                console.error(`❌ Lỗi khi đổi tên ${map.safe}:`, error.message);
-            }
-        }
-        
-        // Xóa dữ liệu stream sau khi hoàn thành
-        try {
-            const tempFiles = fs.readdirSync(TEMP_DIR);
-            for (const file of tempFiles) {
-                if (file.includes('temp_') || file.includes('stream_')) {
-                    fs.unlinkSync(path.join(TEMP_DIR, file));
+
+        // Xử lý Video files
+        if (videoFiles.length > 0) {
+            console.log(`\n🎥 Tìm thấy ${videoFiles.length} file video - Bắt đầu xử lý...`);
+            for (const file of videoFiles) {
+                try {
+                    console.log(`\n⏳ Đang xử lý video: ${file.name}`);
+                    await downloadFromDriveId(file.id, file.name);
+                } catch (error) {
+                    console.error(`❌ Lỗi khi xử lý video ${file.name}:`, error.message);
                 }
             }
-            console.log('🧹 Đã xóa dữ liệu stream tạm thời');
-        } catch (error) {
-            console.error('⚠️ Lỗi khi xóa dữ liệu stream:', error.message);
+        }
+
+        if (pdfFiles.length === 0 && videoFiles.length === 0) {
+            console.log('\n⚠️ Không tìm thấy file PDF hoặc video nào trong thư mục.');
         }
         
-        console.log('\n🎉 Hoàn thành tất cả!');
     } catch (error) {
         console.error('❌ Lỗi:', error.message);
     }
 }
 
-// Gọi hàm để bắt đầu quá trình
+// Chạy test và xử lý folder
+testDriveAPI();
 listFolderContents();

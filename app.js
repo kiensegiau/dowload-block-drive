@@ -432,8 +432,39 @@ async function downloadFromDriveId(driveId, filename) {
     await main(driveId, filename);
 }
 
+async function processVideoFiles(videoFiles, driveAPI) {
+    // Chuyển code xử lý video từ api.js sang đây
+    const fileMapping = [];
+    
+    for (const file of videoFiles) {
+        console.log(`\n🎬 Bắt đầu tải: ${file.name}`);
+        try {
+            let originalName = file.name;
+            if (!originalName.toLowerCase().endsWith('.mp4')) {
+                originalName += '.mp4';
+            }
+            const safeName = originalName.replace(/[^a-zA-Z0-9-_.]/g, '_');
+            
+            await downloadFromDriveId(file.id, safeName);
+            console.log(`✅ Đã tải xong: ${safeName}`);
+            
+            fileMapping.push({
+                safe: safeName,
+                original: originalName
+            });
+        } catch (error) {
+            console.error(`❌ Lỗi khi tải ${file.name}:`, error.message);
+            continue;
+        }
+    }
+    
+    // Xử lý đổi tên và dọn dẹp
+    // ... copy phần code xử lý đổi tên và dọn dẹp từ api.js ...
+}
+
 module.exports = {
     downloadFromDriveId,
     OUTPUT_DIR,
-    TEMP_DIR
+    TEMP_DIR,
+    processVideoFiles
 };
