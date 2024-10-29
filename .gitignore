@@ -3,7 +3,11 @@ node_modules/
 
 # Thư mục chrome-data
 chrome-data/
+<<<<<<< HEAD
 downloads/
+=======
+
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
 # Thư mục temp và output
 temp/
 output/

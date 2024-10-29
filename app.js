@@ -76,7 +76,11 @@ async function downloadVideo(url, filename) {
             // Tạo và mở file để ghi
             let fileHandle;
             try {
+<<<<<<< HEAD
                 // Tạo file trống với kích thước đng
+=======
+                // Tạo file trống với kích thước đúng
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
                 const writer = fs.createWriteStream(outputPath);
                 await new Promise((res, rej) => {
                     writer.on('error', rej);
@@ -145,11 +149,15 @@ async function downloadVideo(url, filename) {
 async function mergeVideoAudio(filename) {
     const videoPath = path.join(TEMP_DIR, 'temp_video.mp4');
     const audioPath = path.join(TEMP_DIR, 'temp_audio.mp4');
+<<<<<<< HEAD
     const outputPath = path.join(VIDEO_OUTPUT_DIR, filename);
 
     if (!fs.existsSync(VIDEO_OUTPUT_DIR)) {
         fs.mkdirSync(VIDEO_OUTPUT_DIR, { recursive: true });
     }
+=======
+    const outputPath = path.join(OUTPUT_DIR, filename);
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
 
     return new Promise((resolve, reject) => {
         console.log('🔄 Đang ghép video và audio...');
@@ -201,26 +209,36 @@ let browser;
 let page;
 let headers = {};
 
+<<<<<<< HEAD
 // Thêm hằng số cho video output directory
 const VIDEO_OUTPUT_DIR = path.join(process.cwd(), 'downloads', 'video');
 
 // Thêm vào đầu file, giữ nguyên các imports hiện có
 const TOKEN_PATH = "token.json";
 
+=======
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
 // Sửa lại hàm getVideoUrl
 async function getVideoUrl(driveId, filename) {
     try {
         console.log('🚀 Khởi động trình duyệt...');
+<<<<<<< HEAD
         
         browser = await puppeteer.launch({
             headless: false,
             defaultViewport: null,
             args: [
                 '--start-maximized',
+=======
+        browser = await puppeteer.launch({
+            headless: 'new',
+            args: [
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-web-security',
                 '--disable-features=IsolateOrigins,site-per-process',
+<<<<<<< HEAD
                 '--disable-blink-features=AutomationControlled',
                 '--allow-running-insecure-content',
                 '--disable-site-isolation-trials',
@@ -286,10 +304,46 @@ async function getVideoUrl(driveId, filename) {
         console.log('🌐 Đang truy cập video...');
         
         await page.goto(driveUrl, {
+=======
+                '--flag-switches-begin',
+                '--flag-switches-end',
+                `--window-size=1920,1080`
+            ],
+            defaultViewport: {
+                width: 1920,
+                height: 1080
+            },
+            userDataDir: path.join(__dirname, 'chrome-data')
+        });
+        
+        page = await browser.newPage();
+
+        // Lấy cookies và user agent để tạo headers
+        const cookies = await page.cookies();
+        const userAgent = await page.evaluate(() => navigator.userAgent);
+        
+        // Khởi tạo headers
+        headers = {
+            'Cookie': cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; '),
+            'User-Agent': userAgent,
+            'Accept': '*/*',
+            'Accept-Encoding': 'identity;q=1, *;q=0',
+            'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
+            'Connection': 'keep-alive'
+        };
+
+        // Truy cập URL video Drive
+        const videoUrl =
+          "https://drive.google.com/file/d/1mMXEGewkYhzNg59SdhTWMdtp7XDIKGsw/view?usp=drive_link";
+        console.log('🌐 Đang truy cp video...');
+        
+        await page.goto(videoUrl, {
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
             waitUntil: 'networkidle0',
             timeout: 60000
         });
 
+<<<<<<< HEAD
         // Click vào player để kích hoạt load video
         try {
             await page.click('.drive-viewer-video-player');
@@ -324,10 +378,66 @@ async function getVideoUrl(driveId, filename) {
 
     } catch (error) {
         console.error('❌ Lỗi:', error.message);
+=======
+        console.log('⏳ Đang đợi video load...');
+        const previewFrame = await page.waitForSelector('iframe[src*="drive.google.com"]');
+        const contentFrame = await previewFrame.contentFrame();
+
+        // Tìm URL trực tiếp từ source
+        const videoData = await contentFrame.evaluate(() => {
+            const ytPlayer = document.querySelector('#movie_player');
+            if (ytPlayer && ytPlayer.getAvailableQualityLevels) {
+                const qualities = ytPlayer.getAvailableQualityLevels();
+                const config = ytPlayer.getPlayerResponse();
+                return {
+                    qualities: qualities,
+                    streamingData: config.streamingData
+                };
+            }
+            return null;
+        });
+
+        if (videoData && videoData.streamingData) {
+            const { formats, adaptiveFormats } = videoData.streamingData;
+            
+            // Tìm video stream chất lượng cao nhất
+            let bestVideoStream = null;
+            let audioStream = null;
+
+            for (const format of adaptiveFormats) {
+                if (format.mimeType.includes('video/mp4')) {
+                    if (!bestVideoStream || format.height > bestVideoStream.height) {
+                        bestVideoStream = format;
+                    }
+                } else if (format.mimeType.includes('audio/mp4') && !audioStream) {
+                    audioStream = format;
+                }
+            }
+
+            if (bestVideoStream && audioStream) {
+                console.log(`🎥 Đã tìm thấy video stream (${bestVideoStream.height}p)`);
+                console.log(`🔊 Đã tìm thấy audio stream`);
+
+                console.log(`\n📺 Tải video với độ phân giải ${bestVideoStream.height}p`);
+                await downloadVideo(bestVideoStream.url, 'temp_video.mp4');
+                await downloadVideo(audioStream.url, 'temp_audio.mp4');
+                await mergeVideoAudio(filename);
+                return;
+            }
+        }
+
+        // Nếu không tìm được URL trực tiếp, fallback về cách cũ
+        console.log('⚠️ Không tìm được URL trực tiếp, thử phương pháp khác...');
+        // ... code cũ ...
+
+    } catch (error) {
+        log(`Lỗi trong getVideoUrl: ${error.message}`, true);
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
         throw error;
     }
 }
 
+<<<<<<< HEAD
 // Helper functions
 function getVideoQuality(itag) {
     const qualities = {
@@ -381,6 +491,8 @@ async function downloadDirectly(driveId, filename, accessToken) {
     });
 }
 
+=======
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
 // Thay đổi đường dẫn TEMP_DIR và OUTPUT_DIR
 const TEMP_DIR = path.join(__dirname, 'temp');
 
@@ -403,10 +515,15 @@ async function setupTempFolders() {
         log('Bắt đầu tạo thư mục...');
         log(`TEMP_DIR: ${TEMP_DIR}`);
         log(`OUTPUT_DIR: ${OUTPUT_DIR}`);
+<<<<<<< HEAD
         log(`VIDEO_OUTPUT_DIR: ${VIDEO_OUTPUT_DIR}`);
 
         // Tạo các thư mục nếu chưa tồn tại
         [TEMP_DIR, OUTPUT_DIR, VIDEO_OUTPUT_DIR].forEach(dir => {
+=======
+
+        [TEMP_DIR, OUTPUT_DIR].forEach(dir => {
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
             if (!fs.existsSync(dir)) {
                 log(`Tạo thư mục: ${dir}`);
                 fs.mkdirSync(dir, { recursive: true });
@@ -417,6 +534,7 @@ async function setupTempFolders() {
 
         // Kiểm tra quyền ghi
         const testFile = path.join(TEMP_DIR, 'test.txt');
+<<<<<<< HEAD
         try {
             fs.writeFileSync(testFile, 'test');
             fs.unlinkSync(testFile);
@@ -429,6 +547,26 @@ async function setupTempFolders() {
     } catch (error) {
         log('❌ Lỗi khi setup thư mục:', error.message);
         log('❌ Stack:', error);
+=======
+        log(`Kiểm tra quyền ghi: ${testFile}`);
+        fs.writeFileSync(testFile, 'test');
+        fs.unlinkSync(testFile);
+        log('✅ Kiểm tra quyền ghi thành công');
+
+        // Dọn dẹp files cũ
+        const files = fs.readdirSync(TEMP_DIR);
+        log(`Số files cần dọn dẹp: ${files.length}`);
+        files.forEach(file => {
+            const filePath = path.join(TEMP_DIR, file);
+            log(`Xóa file: ${filePath}`);
+            fs.unlinkSync(filePath);
+        });
+
+        return true;
+    } catch (error) {
+        log(`Lỗi khi setup thư mục: ${error.message}`, true);
+        log(`Stack: ${error.stack}`, true);
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
         return false;
     }
 }
@@ -499,7 +637,11 @@ process.on('unhandledRejection', async (error) => {
     process.exit(1);
 });
 
+<<<<<<< HEAD
 // Sửa lại hàm downloadFromDriveId ể nhận filename
+=======
+// Sửa lại hàm downloadFromDriveId để nhận filename
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
 async function downloadFromDriveId(driveId, filename) {
     console.log(`🎬 Bắt đầu tải video: ${filename}`);
     // Đảm bảo filename hợp lệ
@@ -508,7 +650,11 @@ async function downloadFromDriveId(driveId, filename) {
 }
 
 async function processVideoFiles(videoFiles, driveAPI) {
+<<<<<<< HEAD
     // Chuyển code xử lý video từ api.js sang đy
+=======
+    // Chuyển code xử lý video từ api.js sang đây
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
     const fileMapping = [];
     
     for (const file of videoFiles) {
@@ -534,13 +680,20 @@ async function processVideoFiles(videoFiles, driveAPI) {
     }
     
     // Xử lý đổi tên và dọn dẹp
+<<<<<<< HEAD
     // ... copy phần code xử lý đổi tên và dn dẹp từ api.js ...
+=======
+    // ... copy phần code xử lý đổi tên và dọn dẹp từ api.js ...
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
 }
 
 module.exports = {
     downloadFromDriveId,
     OUTPUT_DIR,
     TEMP_DIR,
+<<<<<<< HEAD
     VIDEO_OUTPUT_DIR,
+=======
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
     processVideoFiles
 };

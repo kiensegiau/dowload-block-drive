@@ -2,10 +2,16 @@ const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+<<<<<<< HEAD
 const puppeteer = require('puppeteer');
 
 // Import các module cần thiết
 const { downloadFromDriveId, OUTPUT_DIR, TEMP_DIR, VIDEO_OUTPUT_DIR } = require('./app.js');
+=======
+
+// Import các module cần thiết
+const { downloadFromDriveId, OUTPUT_DIR, TEMP_DIR } = require('./app.js');
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
 const { PDFProcessor } = require('./pdf.js');
 const TOKEN_PATH = "token.json";
 class DriveAPI {
@@ -37,6 +43,7 @@ class DriveAPI {
             if (fs.existsSync(TOKEN_PATH)) {
                 const token = JSON.parse(fs.readFileSync(TOKEN_PATH));
                 this.auth.setCredentials(token);
+<<<<<<< HEAD
                 
                 // Kiểm tra token còn hạn không
                 try {
@@ -49,11 +56,15 @@ class DriveAPI {
                 }
             } else {
                 console.log('⚠️ Chưa có token, tiến hành xác thực...');
+=======
+            } else {
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
                 await this.getNewToken();
             }
 
             this.drive = google.drive({ version: 'v3', auth: this.auth });
             console.log('✅ Khởi tạo Drive API thành công');
+<<<<<<< HEAD
             
             // Hiển thị thông tin người dùng
             const userInfo = await this.drive.about.get({
@@ -61,6 +72,8 @@ class DriveAPI {
             });
             console.log('👤 Đã đăng nhập với tài khoản:', userInfo.data.user.emailAddress);
             
+=======
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
         } catch (error) {
             console.error('❌ Lỗi khởi tạo Drive API:', error.message);
             throw error;
@@ -68,6 +81,7 @@ class DriveAPI {
     }
 
     async getNewToken() {
+<<<<<<< HEAD
         try {
             const authUrl = this.auth.generateAuthUrl({
                 access_type: 'offline',
@@ -136,6 +150,40 @@ class DriveAPI {
             console.error('❌ Lỗi khi lấy token:', error.message);
             throw error;
         }
+=======
+        const authUrl = this.auth.generateAuthUrl({
+            access_type: 'offline',
+            scope: SCOPES,
+        });
+
+        console.log('📱 Truy cập URL này để xác thực:', authUrl);
+        const code = await this.promptForCode();
+        
+        const { tokens } = await this.auth.getToken(code);
+        this.auth.setCredentials(tokens);
+        
+        // Lưu token
+        fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens));
+        console.log('💾 Token đã được lưu tại:', TOKEN_PATH);
+    }
+
+    promptForCode() {
+        const readline = require('readline');
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+        });
+
+        return new Promise((resolve) => {
+            rl.question('📝 Nhập mã xác thực: ', (input) => {
+                rl.close();
+                // Tách mã xác thực từ URL
+                const urlParams = new URLSearchParams(input.split('?')[1]);
+                const code = urlParams.get('code');
+                resolve(code);
+            });
+        });
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
     }
 
     async getFolderContents(folderId) {
@@ -167,6 +215,7 @@ class DriveAPI {
 
     async testConnection() {
         try {
+<<<<<<< HEAD
             await this.drive.files.list({
                 pageSize: 1,
                 fields: 'files(id, name)'
@@ -612,10 +661,28 @@ class DriveAPI {
 
         } catch (error) {
             console.error(`${'  '.repeat(depth)}❌ Lỗi:`, error.message);
+=======
+            if (!this.drive) {
+                throw new Error('Drive API chưa được khởi tạo');
+            }
+
+            // Thử lấy thông tin về Drive của user
+            const response = await this.drive.about.get({
+                fields: 'user'
+            });
+
+            console.log('✅ Kết nối Drive API thành công');
+            console.log('👤 User:', response.data.user.displayName);
+            return true;
+        } catch (error) {
+            console.error('❌ Lỗi kết nối Drive API:', error.message);
+            return false;
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
         }
     }
 }
 
+<<<<<<< HEAD
 async function cloneFolderToDrive() {
     try {
       const driveAPI = new DriveAPI();
@@ -635,10 +702,79 @@ async function cloneFolderToDrive() {
       console.log(
         '\n📂 Bạn có thể tìm thấy tất cả files trong folder "video-drive-clone" trên Drive của bạn'
       );
+=======
+// Thêm đoạn code test ở cuối file
+async function testDriveAPI() {
+    try {
+        const driveAPI = new DriveAPI();
+        await driveAPI.initialize();
+        const testResult = await driveAPI.testConnection();
+        
+        if (testResult) {
+            console.log('🎉 Test hoàn tất: Kết nối thành công');
+        } else {
+            console.log('❌ Test thất bại: Không thể kết nối');
+        }
+    } catch (error) {
+        console.error('❌ Lỗi trong quá trình test:', error.message);
+    }
+}
+
+async function listFolderContents() {
+    try {
+        const driveAPI = new DriveAPI();
+        await driveAPI.initialize();
+        
+        // Sử dụng folder ID mới
+        const folderId = "1MyQFPc1p-6yQEfxdR8TaoIU8ugVRulr8";
+        
+        const files = await driveAPI.getFolderContents(folderId);
+        
+        // Phân loại files
+        const pdfFiles = files.filter(file => 
+            file.mimeType === 'application/pdf'
+        );
+        
+        const videoFiles = files.filter(file => 
+            file.mimeType.includes('video/') || 
+            file.mimeType.includes('application/vnd.google-apps.video')
+        );
+
+        // Xử lý PDF files
+        if (pdfFiles.length > 0) {
+            console.log(`\n📑 Tìm thấy ${pdfFiles.length} file PDF - Bắt đầu xử lý...`);
+            const pdfProcessor = new PDFProcessor(driveAPI);
+            await pdfProcessor.processFiles(pdfFiles);
+        }
+
+        // Xử lý Video files
+        if (videoFiles.length > 0) {
+            console.log(`\n🎥 Tìm thấy ${videoFiles.length} file video - Bắt đầu xử lý...`);
+            for (const file of videoFiles) {
+                try {
+                    console.log(`\n⏳ Đang xử lý video: ${file.name}`);
+                    await downloadFromDriveId(file.id, file.name);
+                } catch (error) {
+                    console.error(`❌ Lỗi khi xử lý video ${file.name}:`, error.message);
+                }
+            }
+        }
+
+        if (pdfFiles.length === 0 && videoFiles.length === 0) {
+            console.log('\n⚠️ Không tìm thấy file PDF hoặc video nào trong thư mục.');
+        }
+        
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
     } catch (error) {
         console.error('❌ Lỗi:', error.message);
     }
 }
 
+<<<<<<< HEAD
 // Chạy chương trình
 cloneFolderToDrive();
+=======
+// Chạy test và xử lý folder
+testDriveAPI();
+listFolderContents();
+>>>>>>> b3f67cd8dc95596ddeb683492a271c14469f3b34
