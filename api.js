@@ -2,6 +2,7 @@ const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const puppeteer = require('puppeteer');
 
 // Import các module cần thiết
 const { downloadFromDriveId, OUTPUT_DIR, TEMP_DIR, VIDEO_OUTPUT_DIR } = require('./app.js');
@@ -36,12 +37,30 @@ class DriveAPI {
             if (fs.existsSync(TOKEN_PATH)) {
                 const token = JSON.parse(fs.readFileSync(TOKEN_PATH));
                 this.auth.setCredentials(token);
+                
+                // Kiểm tra token còn hạn không
+                try {
+                    console.log('🔍 Kiểm tra token...');
+                    this.drive = google.drive({ version: 'v3', auth: this.auth });
+                    await this.testConnection();
+                } catch (error) {
+                    console.log('⚠️ Token hết hạn hoặc không hợp lệ, đang làm mới...');
+                    await this.getNewToken();
+                }
             } else {
+                console.log('⚠️ Chưa có token, tiến hành xác thực...');
                 await this.getNewToken();
             }
 
             this.drive = google.drive({ version: 'v3', auth: this.auth });
             console.log('✅ Khởi tạo Drive API thành công');
+            
+            // Hiển thị thông tin người dùng
+            const userInfo = await this.drive.about.get({
+                fields: 'user'
+            });
+            console.log('👤 Đã đăng nhập với tài khoản:', userInfo.data.user.emailAddress);
+            
         } catch (error) {
             console.error('❌ Lỗi khởi tạo Drive API:', error.message);
             throw error;
@@ -49,38 +68,74 @@ class DriveAPI {
     }
 
     async getNewToken() {
-        const authUrl = this.auth.generateAuthUrl({
-            access_type: 'offline',
-            scope: SCOPES,
-        });
-
-        console.log('📱 Truy cập URL này để xác thực:', authUrl);
-        const code = await this.promptForCode();
-        
-        const { tokens } = await this.auth.getToken(code);
-        this.auth.setCredentials(tokens);
-        
-        // Lưu token
-        fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens));
-        console.log('💾 Token đã được lưu tại:', TOKEN_PATH);
-    }
-
-    promptForCode() {
-        const readline = require('readline');
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-        });
-
-        return new Promise((resolve) => {
-            rl.question('📝 Nhập mã xác thực: ', (input) => {
-                rl.close();
-                // Tách mã xác thực từ URL
-                const urlParams = new URLSearchParams(input.split('?')[1]);
-                const code = urlParams.get('code');
-                resolve(code);
+        try {
+            const authUrl = this.auth.generateAuthUrl({
+                access_type: 'offline',
+                scope: ['https://www.googleapis.com/auth/drive.file',
+                       'https://www.googleapis.com/auth/drive.readonly'],
+                prompt: 'consent' // Luôn yêu cầu refresh token
             });
-        });
+
+            console.log('🔑 Đang tự động xác thực...');
+            
+            // Khởi động browser
+            const browser = await puppeteer.launch({
+                headless: false, // Hiện browser để dễ debug
+                args: ['--no-sandbox', '--disable-setuid-sandbox']
+            });
+
+            const page = await browser.newPage();
+            
+            // Theo dõi redirects
+            let authCode = null;
+            page.on('request', request => {
+                const url = request.url();
+                if (url.includes('localhost:3000/api/auth/google-callback')) {
+                    const urlParams = new URLSearchParams(new URL(url).search);
+                    authCode = urlParams.get('code');
+                }
+            });
+
+            // Truy cập trang xác thực
+            await page.goto(authUrl);
+
+            // Đợi cho đến khi có code hoặc timeout sau 2 phút
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Timeout waiting for auth')), 120000)
+            );
+            
+            const codePromise = new Promise(resolve => {
+                const checkCode = setInterval(() => {
+                    if (authCode) {
+                        clearInterval(checkCode);
+                        resolve(authCode);
+                    }
+                }, 1000);
+            });
+
+            const code = await Promise.race([codePromise, timeoutPromise]);
+            
+            // Đóng browser
+            await browser.close();
+
+            if (!code) {
+                throw new Error('Không nhận được mã xác thực');
+            }
+
+            // Lấy token từ code
+            const { tokens } = await this.auth.getToken(code);
+            this.auth.setCredentials(tokens);
+            
+            // Lưu token
+            fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens));
+            console.log('✅ Đã lưu token xác thực');
+
+            return tokens;
+
+        } catch (error) {
+            console.error('❌ Lỗi khi lấy token:', error.message);
+            throw error;
+        }
     }
 
     async getFolderContents(folderId) {
@@ -112,21 +167,18 @@ class DriveAPI {
 
     async testConnection() {
         try {
-            if (!this.drive) {
-                throw new Error('Drive API chưa được khởi tạo');
-            }
-
-            // Thử lấy thông tin về Drive của user
-            const response = await this.drive.about.get({
-                fields: 'user'
+            await this.drive.files.list({
+                pageSize: 1,
+                fields: 'files(id, name)'
             });
-
-            console.log('✅ Kết nối Drive API thành công');
-            console.log('👤 User:', response.data.user.displayName);
             return true;
         } catch (error) {
-            console.error('❌ Lỗi kết nối Drive API:', error.message);
-            return false;
+            if (error.message.includes('invalid_grant') || 
+                error.message.includes('Invalid Credentials') ||
+                error.message.includes('token expired')) {
+                throw new Error('Token hết hạn');
+            }
+            throw error;
         }
     }
 
@@ -464,136 +516,71 @@ class DriveAPI {
                                 continue;
                             }
 
-                            if (item.mimeType.includes('video/')) {
-                                // Tạo session ID duy nhất cho mỗi video
-                                const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-                                const sessionDir = path.join(TEMP_DIR, sessionId);
-                                const videoPath = path.join(VIDEO_OUTPUT_DIR, item.name);
-                                
+                            if (item.mimeType.includes('video')) {
+                                console.log(`📥 Đang tải video: ${item.name}`);
                                 try {
-                                    console.log(`${'  '.repeat(depth)}📥 Đang tải video: ${item.name}`);
-                                    
-                                    // Download video
-                                    await downloadFromDriveId(item.id, item.name);
-                                    console.log(`${'  '.repeat(depth)}✅ Đã tải xong video: ${item.name}`);
-
-                                    // Kiểm tra file tồn tại trước khi upload
-                                    if (!fs.existsSync(videoPath)) {
-                                        throw new Error(`Không tìm thấy file video: ${item.name}`);
-                                    }
-
-                                    // Upload video
-                                    console.log(`${'  '.repeat(depth)}📤 Đang upload video: ${item.name}`);
-                                    const fileMetadata = {
-                                        name: item.name,
-                                        parents: [targetFolderId]
-                                    };
-
-                                    const media = {
-                                        mimeType: item.mimeType,
-                                        body: fs.createReadStream(videoPath)
-                                    };
-
-                                    // Upload và đợi cho đến khi hoàn thành
-                                    await this.drive.files.create({
-                                        resource: fileMetadata,
-                                        media: media,
-                                        fields: 'id'
-                                    });
-
-                                    console.log(`${'  '.repeat(depth)}✅ Upload thành công: ${item.name}`);
-
-                                    // Chỉ xóa file sau khi upload thành công
-                                    if (fs.existsSync(videoPath)) {
-                                        // Đợi một chút để đảm bảo stream đã đóng
-                                        await new Promise(resolve => setTimeout(resolve, 1000));
-                                        fs.unlinkSync(videoPath);
-                                        console.log(`${'  '.repeat(depth)}🗑️ Đã xóa file video: ${item.name}`);
-                                    }
-
-                                    // Dọn dẹp các file tạm liên quan
-                                    const tempFiles = fs.readdirSync(TEMP_DIR);
-                                    for (const tempFile of tempFiles) {
-                                        if (tempFile.includes(sessionId)) {
-                                            const tempPath = path.join(TEMP_DIR, tempFile);
-                                            try {
-                                                fs.unlinkSync(tempPath);
-                                                console.log(`${'  '.repeat(depth)}🗑️ Đã xóa file tạm: ${tempFile}`);
-                                            } catch (err) {
-                                                console.warn(`${'  '.repeat(depth)}⚠️ Không thể xóa file tạm: ${tempFile}`);
-                                            }
-                                        }
-                                    }
-
+                                    // Truyền this (DriveAPI instance) vào hàm getVideoUrl
+                                    await downloadFromDriveId(item.id, item.name, this);
+                                    // ... code xử lý tiếp theo ...
                                 } catch (error) {
-                                    console.error(`${'  '.repeat(depth)}❌ Lỗi xử lý video: ${error.message}`);
-                                    // Dọn dẹp nếu có lỗi
-                                    try {
-                                        if (fs.existsSync(videoPath)) {
-                                            fs.unlinkSync(videoPath);
-                                            console.log(`${'  '.repeat(depth)}🗑️ Đã xóa file video sau lỗi: ${item.name}`);
-                                        }
-                                    } catch (cleanupError) {
-                                        console.warn(`${'  '.repeat(depth)}⚠️ Không thể xóa file sau lỗi: ${cleanupError.message}`);
-                                    }
+                                    // ... xử lý lỗi ...
                                 }
-                            } else {
-                                // Xử lý các file không phải video
-                                const tempFilePath = path.join(TEMP_DIR, `temp_${Date.now()}_${item.name}`);
-                                
+                            }
+
+                          
+                            
+                            try {
+                                console.log(`${'  '.repeat(depth)}📥 Đang tải: ${item.name}`);
+                                await this.drive.files.get(
+                                    { fileId: item.id, alt: 'media' },
+                                    { responseType: 'stream' }
+                                ).then(response => {
+                                    return new Promise((resolve, reject) => {
+                                        const dest = fs.createWriteStream(tempFilePath);
+                                        response.data
+                                            .on('end', () => resolve())
+                                            .on('error', err => reject(err))
+                                            .pipe(dest);
+                                    });
+                                });
+
+                                // Upload file
+                                console.log(`${'  '.repeat(depth)}📤 Đang upload: ${item.name}`);
+                                const fileMetadata = {
+                                    name: item.name,
+                                    parents: [targetFolderId]
+                                };
+
+                                const media = {
+                                    mimeType: item.mimeType,
+                                    body: fs.createReadStream(tempFilePath)
+                                };
+
+                                // Upload và đợi hoàn thành
+                                await this.drive.files.create({
+                                    resource: fileMetadata,
+                                    media: media,
+                                    fields: 'id'
+                                });
+
+                                console.log(`${'  '.repeat(depth)}✅ Upload thành công: ${item.name}`);
+
+                                // Chỉ xóa sau khi upload thành công
+                                if (fs.existsSync(tempFilePath)) {
+                                    await new Promise(resolve => setTimeout(resolve, 1000));
+                                    fs.unlinkSync(tempFilePath);
+                                    console.log(`${'  '.repeat(depth)}🗑️ Đã xóa file tạm: ${item.name}`);
+                                }
+
+                            } catch (error) {
+                                console.error(`${'  '.repeat(depth)}❌ Lỗi xử lý file: ${error.message}`);
+                                // Dọn dẹp nếu có lỗi
                                 try {
-                                    console.log(`${'  '.repeat(depth)}📥 Đang tải: ${item.name}`);
-                                    await this.drive.files.get(
-                                        { fileId: item.id, alt: 'media' },
-                                        { responseType: 'stream' }
-                                    ).then(response => {
-                                        return new Promise((resolve, reject) => {
-                                            const dest = fs.createWriteStream(tempFilePath);
-                                            response.data
-                                                .on('end', () => resolve())
-                                                .on('error', err => reject(err))
-                                                .pipe(dest);
-                                        });
-                                    });
-
-                                    // Upload file
-                                    console.log(`${'  '.repeat(depth)}📤 Đang upload: ${item.name}`);
-                                    const fileMetadata = {
-                                        name: item.name,
-                                        parents: [targetFolderId]
-                                    };
-
-                                    const media = {
-                                        mimeType: item.mimeType,
-                                        body: fs.createReadStream(tempFilePath)
-                                    };
-
-                                    // Upload và đợi hoàn thành
-                                    await this.drive.files.create({
-                                        resource: fileMetadata,
-                                        media: media,
-                                        fields: 'id'
-                                    });
-
-                                    console.log(`${'  '.repeat(depth)}✅ Upload thành công: ${item.name}`);
-
-                                    // Chỉ xóa sau khi upload thành công
                                     if (fs.existsSync(tempFilePath)) {
-                                        await new Promise(resolve => setTimeout(resolve, 1000));
                                         fs.unlinkSync(tempFilePath);
-                                        console.log(`${'  '.repeat(depth)}🗑️ Đã xóa file tạm: ${item.name}`);
                                     }
-
-                                } catch (error) {
-                                    console.error(`${'  '.repeat(depth)}❌ Lỗi xử lý file: ${error.message}`);
-                                    // Dọn dẹp nếu có lỗi
-                                    try {
-                                        if (fs.existsSync(tempFilePath)) {
-                                            fs.unlinkSync(tempFilePath);
-                                        }
-                                    } catch (cleanupError) {
-                                        console.warn(`${'  '.repeat(depth)}⚠️ Không thể xóa file tạm: ${cleanupError.message}`);
-                                    }
+                                } catch (cleanupError) {
+                                    console.warn(`${'  '.repeat(depth)}⚠️ Không thể xóa file tạm: ${cleanupError.message}`);
                                 }
                             }
                         } catch (error) {
@@ -631,21 +618,23 @@ class DriveAPI {
 
 async function cloneFolderToDrive() {
     try {
-        const driveAPI = new DriveAPI();
-        await driveAPI.initialize();
+      const driveAPI = new DriveAPI();
+      await driveAPI.initialize();
 
-        // Tạo folder gốc "video-drive-clone"
-        const rootFolderId = await driveAPI.createRootFolder();
-        console.log(`📁 Folder gốc ID: ${rootFolderId}`);
+      // Tạo folder gốc "video-drive-clone"
+      const rootFolderId = await driveAPI.createRootFolder();
+      console.log(`📁 Folder gốc ID: ${rootFolderId}`);
 
-        // ID folder nguồn cần copy
-        const sourceFolderId = "1NI3zYATy7_Ff4yndVpxS98LgHpWcr6Gv";
-        
-        console.log('\n🚀 Bắt đầu sao chép vào folder "video-drive-clone"...');
-        await driveAPI.downloadAndUploadFolder(sourceFolderId, rootFolderId);
-        console.log('\n✅ Hoàn thành sao chép!');
-        
-        console.log('\n📂 Bạn có thể tìm thấy tất cả files trong folder "video-drive-clone" trên Drive của bạn');
+      // ID folder nguồn cần copyhttps://drive.google.com/drive/u/3/folders/1DcmFSoMDVRhPzFtOFrXwK2Z9QTCiwh-Y
+      const sourceFolderId = "1s-rCF0EUab3hCZn5bgWAclDuTsmC4dBN";
+
+      console.log('\n🚀 Bắt đầu sao chép vào folder "video-drive-clone"...');
+      await driveAPI.downloadAndUploadFolder(sourceFolderId, rootFolderId);
+      console.log("\n✅ Hoàn thành sao chép!");
+
+      console.log(
+        '\n📂 Bạn có thể tìm thấy tất cả files trong folder "video-drive-clone" trên Drive của bạn'
+      );
     } catch (error) {
         console.error('❌ Lỗi:', error.message);
     }
