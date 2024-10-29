@@ -1,0 +1,19 @@
+{
+  "name": "drive-downloader",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.7.7",
+    "chrome-cookies-secure": "^2.1.1",
+    "googleapis": "^144.0.0",
+    "lodash": "^4.17.21",
+    "puppeteer": "^23.6.1"
+  },
+  "description": "��#\u0000 \u0000d\u0000r\u0000i\u0000v\u0000e\u0000\r\u0000 \u0000"
+}
